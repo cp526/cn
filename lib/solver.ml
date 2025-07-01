@@ -197,7 +197,7 @@ let fresh_name s x =
 
 
 (** Declare an uninterpreted function. *)
-let declare_uninterpreted s name args_ts res_t =
+let _declare_uninterpreted s name args_ts res_t =
   let check f = Sym.Map.find_opt name f.uninterpreted in
   match search_frames s check with
   | Some e -> e
@@ -1001,15 +1001,8 @@ let rec translate_term s iterm =
   | MapGet (mp, k) -> SMT.arr_select (translate_term s mp) (translate_term s k)
   | MapDef _ -> failwith "MapDef"
   | Apply (name, args) ->
-    let def = Option.get (get_logical_function_def s.globals name) in
-    (match def.body with
-     | Def body -> translate_term s (Definition.Function.open_ def.args body args)
-     | _ ->
-       let do_arg arg = translate_base_type (IT.get_bt arg) in
-       let args_ts = List.map do_arg args in
-       let res_t = translate_base_type def.return_bt in
-       let fu = declare_uninterpreted s name args_ts res_t in
-       SMT.app fu (List.map (translate_term s) args))
+     let sname = CN_Names.uninterpreted_name name in
+     SMT.app (SMT.atom sname) (List.map (translate_term s) args)
   | Let ((x, e1), e2) ->
     let se1 = translate_term s e1 in
     let name = CN_Names.var_name x in
@@ -1153,6 +1146,29 @@ let declare_datatype_group s names =
   ack_command s (SMT.declare_datatypes (List.map to_smt names))
 
 
+(** Define function, or declare a group of (possibly) mutually recursive functions *)
+let declare_or_define_function_group s names =
+  let open Definition.Function in
+  List.iter (fun name ->
+      let sname = CN_Names.uninterpreted_name name in
+      let def = Sym.Map.find name s.globals.logical_functions in
+      let res_t = translate_base_type def.return_bt in
+      match def.body with
+      | (Uninterp | Rec_Def _) ->
+         let args_ts = List.map (fun (_, bt) -> translate_base_type bt) def.args in
+         ack_command s (SMT.declare_fun sname args_ts res_t);
+      | Def body ->
+         let args =
+           List.map (fun (s,bt) ->
+               (CN_Names.var_name s,translate_base_type bt)
+             ) def.args
+         in
+         let body_sexp = translate_term s body in
+         ack_command s (SMT.define_fun sname args res_t body_sexp)
+    ) names
+
+
+
 (** Declare a struct type and all struct types that it depends on.
     The `done_struct` keeps track of which structs we've already declared. *)
 let rec declare_struct s done_struct name decl =
@@ -1193,7 +1209,9 @@ let declare_solver_basics s =
      structs. *)
   let done_structs = ref Sym.Set.empty in
   Sym.Map.iter (declare_struct s done_structs) s.globals.struct_decls;
-  List.iter (declare_datatype_group s) (Option.get s.globals.datatype_order)
+  List.iter (declare_datatype_group s) (Option.get s.globals.datatype_order);
+  List.iter (declare_or_define_function_group s) (Option.get s.globals.logical_function_order)
+
 
 
 (* Logging *)
