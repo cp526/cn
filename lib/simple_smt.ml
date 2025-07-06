@@ -545,6 +545,7 @@ let check s =
   | Sexp.Atom "unknown" -> Unknown
   | ans -> raise (UnexpectedSolverResponse ans)
 
+let reset s = ack_command s (Sexp.of_string "(reset)")
 
 (** {2 Decoding Results} *)
 
@@ -899,21 +900,31 @@ let printf_log =
   }
 
 
-let cvc5 : solver_config =
+
+let incremental_timeout = 200
+
+let cvc5 incremental : solver_config =
   { exe = "cvc5";
     (* opts = [ "--incremental"; "--sets-ext"; "--force-logic=QF_AUFBVDTLIA" ]; *)
     (* NOTE cvc5 1.2.1 renamed --sets-ext to --sets-exp *)
-    opts = [ "--incremental"; "--sets-ext"; "--force-logic=QF_ALL" ];
+    opts = 
+      if incremental 
+      then [ "--incremental"; "--tlimit-per="^(string_of_int incremental_timeout); "--sets-ext"; "--force-logic=QF_ALL" ]
+      else [ "--sets-ext"; "--force-logic=QF_ALL" ];
     setup = [];
     exts = CVC5;
     log = quiet_log
   }
 
 
-let z3 : solver_config =
+
+let z3 incremental : solver_config =
   let setup =
+    (if incremental then [set_option ":timeout" (string_of_int incremental_timeout)] else [])
+    @
     [ set_option ":auto_config" "false";
-      set_option ":smt.relevancy" "0"
+      set_option ":smt.relevancy" "0";
+      set_option ":smtlib2_compliant" "true";
       (* set_option ":sat.smt" "true"; *)
       (* not ready for use just yet -- see Z3 github issue tracker *)
       (* set_option ":combined_solver.solver2_timeout" "500"; *)

@@ -3,6 +3,8 @@ module IT = IndexTerms
 open IT
 module LC = LogicalConstraints
 
+module Incremental = struct
+
 module Int_BT_Table = Map.Make (struct
     type t = int * BT.t
 
@@ -143,6 +145,14 @@ let get_ctype_table s =
   let do_frame f = CTypeMap.iter add_entry f.ctypes in
   List.iter do_frame (!(s.cur_frame) :: !(s.prev_frames));
   table
+
+let iter_commands s (fn : SMT.sexp -> unit) =
+  let iter_frame f = List.fold_right (fun cmd () -> 
+                         (* print_endline (Sexplib.Sexp.to_string_hum cmd); *)
+                         fn cmd) f.commands in
+  let iter_frames fs = List.fold_right iter_frame fs in
+  iter_frames !(s.prev_frames) ();
+  iter_frame !(s.cur_frame) ()
 
 
 let debug_ack_command s cmd =
@@ -1130,10 +1140,6 @@ let translate_goal solver assumptions lc =
   { instantiated with extra = List.fold_left add_asmps [] instantiated.qs }
 
 
-(* as similarly suggested by Robbert *)
-let shortcut simp_ctxt lc =
-  let lc = Simplify.LogicalConstraints.simp simp_ctxt lc in
-  match lc with LC.T (IT (Const (Bool true), _, _)) -> `True | _ -> `No_shortcut lc
 
 
 (** {1 Solver Initialization} *)
@@ -1196,6 +1202,21 @@ let declare_solver_basics s =
   List.iter (declare_datatype_group s) (Option.get s.globals.datatype_order)
 
 
+  let make globals (cfg : bool -> Simple_smt.solver_config) =
+    let s = 
+      { smt_solver = SMT.new_solver (cfg true);
+        cur_frame = ref (empty_solver_frame ());
+        prev_frames = ref [];
+        name_seed = ref 0;
+        globals
+      }
+    in
+    declare_solver_basics s;
+    s
+
+end
+
+
 (* Logging *)
 
 module Logger = struct
@@ -1241,6 +1262,9 @@ module Logger = struct
       { SMT.send = (fun _ -> ()); SMT.receive = (fun _ -> ()); SMT.stop = (fun _ -> ()) }
 end
 
+
+type solver = { incremental : Incremental.solver; simple : SMT.solver }
+
 let solver_path = ref (None : string option)
 
 let solver_type = ref (None : SMT.solver_extensions option)
@@ -1263,29 +1287,21 @@ let select_solver_type () =
 
 (** Make a new solver instance *)
 let make globals =
-  let base_cfg =
-    match select_solver_type () with
-    | Z3 -> SMT.z3
-    | CVC5 -> SMT.cvc5
-    | Other -> failwith "Unsupported solver type."
-  in
-  let cfg =
-    { base_cfg with
-      exe = Option.value ~default:base_cfg.exe !solver_path;
-      opts = Option.value ~default:base_cfg.opts !solver_flags;
-      log = Logger.make (SMT.string_of_solver_extension base_cfg.exts)
+  let cfg incremental =
+    let base =
+      match select_solver_type () with
+      | Z3 -> SMT.z3 incremental
+      | CVC5 -> SMT.cvc5 incremental
+      | Other -> failwith "Unsupported solver type."
+    in
+    { base with
+      exe = Option.value ~default:base.exe !solver_path;
+      opts = Option.value ~default:base.opts !solver_flags;
+      log = Logger.make (SMT.string_of_solver_extension base.exts)
     }
   in
-  let s =
-    { smt_solver = SMT.new_solver cfg;
-      cur_frame = ref (empty_solver_frame ());
-      prev_frames = ref [];
-      name_seed = ref 0;
-      globals
-    }
-  in
-  declare_solver_basics s;
-  s
+  { incremental = Incremental.make globals cfg; 
+    simple = SMT.new_solver (cfg false) }
 
 
 (* ---------------------------------------------------------------------------*)
@@ -1332,7 +1348,7 @@ let model_evaluator, reset_model_evaluator_state =
     model_evaluator_solver := None;
     model_id := 0
   in
-  let model_evaluator solver mo =
+  let model_evaluator {incremental = solver; simple = _} mo =
     match SMT.to_list mo with
     | None -> failwith "model is an atom"
     | Some defs ->
@@ -1349,7 +1365,7 @@ let model_evaluator, reset_model_evaluator_state =
       let model_id = new_model_id () in
       let gs = solver.globals in
       let evaluator =
-        { smt_solver;
+        Incremental.{ smt_solver;
           cur_frame = ref (empty_solver_frame ());
           prev_frames =
             ref
@@ -1362,20 +1378,20 @@ let model_evaluator, reset_model_evaluator_state =
         }
       in
       if new_solver then (
-        declare_solver_basics evaluator;
-        push evaluator);
+        Incremental.declare_solver_basics evaluator;
+        Incremental.push evaluator);
       let model_fn e =
         if not (!currently_loaded_model = model_id) then (
           currently_loaded_model := model_id;
-          pop evaluator 1;
-          push evaluator;
-          List.iter (debug_ack_command evaluator) defs);
-        let inp = translate_term evaluator e in
+          Incremental.pop evaluator 1;
+          Incremental.push evaluator;
+          List.iter (Incremental.debug_ack_command evaluator) defs);
+        let inp = Incremental.translate_term evaluator e in
         match SMT.check smt_solver with
         | SMT.Sat ->
           let res = SMT.get_expr smt_solver inp in
-          let ctys = get_ctype_table evaluator in
-          Some (get_ivalue gs ctys (get_bt e) (SMT.no_let res))
+          let ctys = Incremental.get_ctype_table evaluator in
+          Some (Incremental.get_ivalue gs ctys (get_bt e) (SMT.no_let res))
         | _ -> None
       in
       Hashtbl.add models_tbl model_id model_fn;
@@ -1387,6 +1403,9 @@ let model_evaluator, reset_model_evaluator_state =
 (* ---------------------------------------------------------------------------*)
 
 module TryHard = struct
+
+  open Incremental
+
   let translate_forall solver qs body =
     let alpha_rename qs body =
       let comb (s1, bt) (qs1, body1) =
@@ -1396,7 +1415,7 @@ module TryHard = struct
       List.fold_right comb qs ([], body)
     in
     let qs, body = alpha_rename qs body in
-    let body_ = translate_term solver body in
+    let body_ = Incremental.translate_term solver body in
     let qs_ =
       List.map
         (fun (s, bt) ->
@@ -1438,13 +1457,36 @@ module TryHard = struct
     List.map (translate_lc solver) (List.filter LC.is_forall assumptions)
 end
 
+(* TODO: until that's reinstated *)
+let _ = TryHard.translate_functions, TryHard.translate_foralls
+
 let try_hard = ref false
 
-let provableWithUnknown ~loc ~solver ~assumptions ~simp_ctxt lc =
+
+let num_scopes { incremental ; simple = _ } = 
+  Incremental.num_scopes incremental
+
+let push { incremental ; simple = _ } = 
+  Incremental.push incremental
+
+let pop { incremental ; simple = _ } n = 
+  Incremental.pop incremental n
+
+let add_assumption { incremental ; simple = _ } lc = 
+  Incremental.add_assumption incremental lc
+
+(* let nonincremental = ref 0 *)
+
+(* as similarly suggested by Robbert *)
+let shortcut simp_ctxt lc =
+  let lc = Simplify.LogicalConstraints.simp simp_ctxt lc in
+  match lc with LC.T (IT (Const (Bool true), _, _)) -> `True | _ -> `No_shortcut lc
+
+let provableWithUnknown ~loc ~solver:{incremental;simple} ~assumptions ~simp_ctxt lc =
   let _ = loc in
   let set_model smt_solver qs =
     let defs = SMT.get_model smt_solver in
-    let model = model_evaluator solver defs in
+    let model = model_evaluator {incremental; simple} defs in
     model_state := Model (model, qs)
   in
   match shortcut simp_ctxt lc with
@@ -1452,49 +1494,33 @@ let provableWithUnknown ~loc ~solver ~assumptions ~simp_ctxt lc =
     model_state := No_model;
     `True
   | `No_shortcut lc ->
-    let { expr; qs; extra } = translate_goal solver assumptions lc in
+    let Incremental.{ expr; qs; extra } = Incremental.translate_goal incremental assumptions lc in
     let nexpr = SMT.bool_not expr in
-    let inc = solver.smt_solver in
-    debug_ack_command solver (SMT.push 1);
-    debug_ack_command solver (SMT.assume (SMT.bool_ands (nexpr :: extra)));
-    (match SMT.check inc with
+    Incremental.debug_ack_command incremental (SMT.push 1);
+    Incremental.debug_ack_command incremental (SMT.assume (SMT.bool_ands (nexpr :: extra)));
+    (match SMT.check incremental.smt_solver with
      | SMT.Unsat ->
-       debug_ack_command solver (SMT.pop 1);
+       Incremental.debug_ack_command incremental (SMT.pop 1);
        model_state := No_model;
        `True
-     | SMT.Sat when !try_hard ->
-       debug_ack_command solver (SMT.pop 1);
-       let assumptions = LC.Set.elements assumptions in
-       let foralls = TryHard.translate_foralls solver assumptions in
-       let functions = TryHard.translate_functions solver in
-       debug_ack_command solver (SMT.push 1);
-       debug_ack_command
-         solver
-         (SMT.assume (SMT.bool_ands ((nexpr :: foralls) @ functions)));
-       Pp.(debug 3 (lazy !^"***** try-hard *****"));
-       (match SMT.check inc with
-        | SMT.Unsat ->
-          debug_ack_command solver (SMT.pop 1);
-          model_state := No_model;
-          Pp.(debug 3 (lazy !^"***** try-hard: provable *****"));
-          `True
-        | SMT.Sat ->
-          set_model inc qs;
-          debug_ack_command solver (SMT.pop 1);
-          Pp.(debug 3 (lazy !^"***** try-hard: unprovable *****"));
-          `Unknown (*TODO CHT*)
-        | SMT.Unknown ->
-          set_model inc qs;
-          debug_ack_command solver (SMT.pop 1);
-          Pp.(debug 3 (lazy !^"***** try-hard: unknown *****"));
-          `False)
      | SMT.Sat ->
-       set_model inc qs;
-       debug_ack_command solver (SMT.pop 1);
+       set_model incremental.smt_solver qs;
+       Incremental.debug_ack_command incremental (SMT.pop 1);
        `False
      | SMT.Unknown ->
-       debug_ack_command solver (SMT.pop 1);
-       failwith "Unknown")
+        (* nonincremental := !nonincremental + 1; *)
+        (* print_endline ("non-incremental solver " ^ string_of_int !nonincremental); *)
+       SMT.reset simple;
+       Incremental.iter_commands incremental (SMT.ack_command simple);
+       SMT.ack_command simple (SMT.assume (SMT.bool_ands (nexpr :: extra)));
+       let result = match SMT.check simple with
+         | SMT.Unsat -> model_state := No_model; `True
+         | SMT.Sat -> set_model simple qs; `False
+         | SMT.Unknown -> failwith "unknown"
+       in
+       Incremental.debug_ack_command incremental (SMT.pop 1);
+       result
+    )
 
 
 (** The main way to query the solver. *)
