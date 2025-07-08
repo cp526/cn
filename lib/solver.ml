@@ -63,8 +63,10 @@ module CN_Constant = struct
   let array_to_list = ("array_to_list_uf", 7)
 end
 
+type command_kind = DeclareSort | DeclareFun | DefineFun | Assert
+
 type solver_frame =
-  { mutable commands : SMT.sexp list; (** Ack-style SMT commands, most recent first. *)
+  { mutable commands : (command_kind * SMT.sexp) list; (** Ack-style SMT commands, most recent first. *)
     mutable uninterpreted : SMT.sexp Sym.Map.t;
       (** Uninterpreted functions and variables that we've declared. *)
     mutable bt_uninterpreted : SMT.sexp Int_BT_Table.t
@@ -90,6 +92,10 @@ type solver =
       (** Declarations for C types. Each C type is assigned a unique integer.
           Unlike previously, this mapping is fixed (constant) from the start. *)
   }
+
+let _commands s = 
+  !(s.cur_frame).commands @ List.concat_map (fun f -> f.commands) !(s.prev_frames)
+
 
 module Debug = struct
   let dump_frame (f : solver_frame) =
@@ -161,10 +167,10 @@ let pop s n =
 let num_scopes s = List.length !(s.prev_frames)
 
 (** Do an ack_style command. These are logged. *)
-let ack_command s cmd =
+let ack_command s (kind, cmd) =
   debug_ack_command s cmd;
   let f = !(s.cur_frame) in
-  f.commands <- cmd :: f.commands
+  f.commands <- (kind, cmd) :: f.commands
 
 
 (** Generate a fersh name *)
@@ -182,7 +188,7 @@ let declare_uninterpreted s name args_ts res_t =
   | Some e -> e
   | None ->
     let sname = CN_Names.uninterpreted_name name in
-    ack_command s (SMT.declare_fun sname args_ts res_t);
+    ack_command s (DeclareFun, SMT.declare_fun sname args_ts res_t);
     let e = SMT.atom sname in
     let f = !(s.cur_frame) in
     f.uninterpreted <- Sym.Map.add name e f.uninterpreted;
@@ -196,7 +202,7 @@ let declare_bt_uninterpreted s (name, k) bt args_ts res_t =
   | Some e -> e
   | None ->
     let sname = fresh_name s name in
-    ack_command s (SMT.declare_fun sname args_ts res_t);
+    ack_command s (DeclareFun, SMT.declare_fun sname args_ts res_t);
     let e = SMT.atom sname in
     let top_map = !(s.cur_frame).bt_uninterpreted in
     !(s.cur_frame).bt_uninterpreted <- Int_BT_Table.add (k, bt) e top_map;
@@ -234,7 +240,7 @@ module CN_Tuple = struct
       let params = List.init arity param in
       let field i = (selector arity i, SMT.atom (param i)) in
       let fields = List.init arity field in
-      ack_command s (SMT.declare_datatype name params [ (name, fields) ])
+      ack_command s (DeclareSort, SMT.declare_datatype name params [ (name, fields) ])
     done
 
 
@@ -281,7 +287,7 @@ module CN_MemByte = struct
   let declare s =
     ack_command
       s
-      (SMT.declare_datatype
+      (DeclareSort, SMT.declare_datatype
          name
          []
          [ ( alloc_id_value_name,
@@ -341,7 +347,7 @@ module CN_Pointer = struct
   let declare s =
     ack_command
       s
-      (SMT.declare_datatype
+      (DeclareSort, SMT.declare_datatype
          name
          []
          [ (null_name, []);
@@ -350,7 +356,7 @@ module CN_Pointer = struct
          ]);
     ack_command
       s
-      (SMT.define_fun
+      (DefineFun, SMT.define_fun
          ptr_shift_name
          [ ("p", t); ("offset", SMT.t_bits width); ("null_case", t) ]
          t
@@ -361,7 +367,7 @@ module CN_Pointer = struct
               con_aia ~alloc_id ~addr:(SMT.bv_add addr (SMT.atom "offset")))));
     ack_command
       s
-      (SMT.define_fun
+      (DefineFun, SMT.define_fun
          copy_alloc_id_name
          [ ("p", t); ("new_addr", SMT.t_bits width); ("null_case", t) ]
          t
@@ -372,7 +378,7 @@ module CN_Pointer = struct
               con_aia ~alloc_id ~addr:(SMT.atom "new_addr"))));
     ack_command
       s
-      (SMT.define_fun
+      (DefineFun, SMT.define_fun
          alloc_id_of_name
          [ ("p", t); ("null_case", CN_AllocId.t ()) ]
          (CN_AllocId.t ())
@@ -382,7 +388,7 @@ module CN_Pointer = struct
             ~alloc_id_addr_case:(fun ~alloc_id ~addr:_ -> alloc_id)));
     ack_command
       s
-      (SMT.define_fun
+      (DefineFun, SMT.define_fun
          bits_to_ptr_name
          [ ("bits", SMT.t_bits width); ("alloc_id", CN_AllocId.t ()) ]
          t
@@ -392,7 +398,7 @@ module CN_Pointer = struct
             (con_aia ~addr:(SMT.atom "bits") ~alloc_id:(SMT.atom "alloc_id"))));
     ack_command
       s
-      (SMT.define_fun
+      (DefineFun, SMT.define_fun
          addr_of_name
          [ ("p", t) ]
          (SMT.t_bits width)
@@ -434,7 +440,7 @@ module CN_List = struct
     let a = SMT.atom "a" in
     ack_command
       s
-      (SMT.declare_datatype
+      (DeclareSort, SMT.declare_datatype
          name
          [ "a" ]
          [ (nil_name, []); (cons_name, [ (head_name, a); (tail_name, t a) ]) ])
@@ -657,7 +663,7 @@ let translate_var s name bt =
   | Some e -> e
   | None ->
     let sname = CN_Names.var_name name in
-    ack_command s (SMT.declare sname (translate_base_type bt));
+    ack_command s (DeclareFun, SMT.declare sname (translate_base_type bt));
     let e = SMT.atom sname in
     let f = !(s.cur_frame) in
     f.uninterpreted <- Sym.Map.add name e f.uninterpreted;
@@ -1067,7 +1073,7 @@ let rec translate_term s iterm =
 let add_assumption solver global lc =
   let s1 = { solver with globals = global } in
   match lc with
-  | LC.T it -> ack_command solver (SMT.assume (translate_term s1 it))
+  | LC.T it -> ack_command solver (Assert, SMT.assume (translate_term s1 it))
   | Forall _ -> ()
 
 
@@ -1122,7 +1128,7 @@ let declare_datatype_group s names =
     let info = Sym.Map.find x s.globals.datatypes in
     (CN_Names.datatype_name x, [], cons info)
   in
-  ack_command s (SMT.declare_datatypes (List.map to_smt names))
+  ack_command s (DeclareSort, SMT.declare_datatypes (List.map to_smt names))
 
 
 (** Declare a struct type and all struct types that it depends on.
@@ -1149,7 +1155,7 @@ let rec declare_struct s done_struct name decl =
     let mk_piece (x : Memory.struct_piece) = Option.map mk_field x.member_or_padding in
     ack_command
       s
-      (SMT.declare_datatype
+      (DeclareSort, SMT.declare_datatype
          (CN_Names.struct_name name)
          []
          [ (CN_Names.struct_con_name name, List.filter_map mk_piece decl) ]))
