@@ -326,7 +326,7 @@ module CN_Pointer = struct
         ])
 
 
-  let ptr_shift_name = "ptr_shift"
+  (* let ptr_shift_name = "ptr_shift" *)
 
   let copy_alloc_id_name = "copy_alloc_id"
 
@@ -352,17 +352,17 @@ module CN_Pointer = struct
            ( alloc_id_addr_name,
              [ (alloc_id_name, CN_AllocId.t ()); (addr_name, SMT.t_bits width) ] )
          ]);
-    ack_command
-      s
-      (SMT.define_fun
-         ptr_shift_name
-         [ ("p", t); ("offset", SMT.t_bits width); ("null_case", t) ]
-         t
-         (match_ptr
-            (SMT.atom "p")
-            ~null_case:(SMT.atom "null_case")
-            ~alloc_id_addr_case:(fun ~alloc_id ~addr ->
-              con_aia ~alloc_id ~addr:(SMT.bv_add addr (SMT.atom "offset")))));
+    (* ack_command *)
+    (*   s *)
+    (*   (SMT.define_fun *)
+    (*      ptr_shift_name *)
+    (*      [ ("p", t); ("offset", SMT.t_bits width); ("null_case", t) ] *)
+    (*      t *)
+    (*      (match_ptr *)
+    (*         (SMT.atom "p") *)
+    (*         ~null_case:(SMT.atom "null_case") *)
+    (*         ~alloc_id_addr_case:(fun ~alloc_id ~addr -> *)
+    (*           con_aia ~alloc_id ~addr:(SMT.bv_add addr (SMT.atom "offset"))))); *)
     ack_command
       s
       (SMT.define_fun
@@ -406,8 +406,7 @@ module CN_Pointer = struct
             ~alloc_id_addr_case:(fun ~alloc_id:_ ~addr -> addr)))
 
 
-  let ptr_shift ~ptr ~offset ~null_case =
-    SMT.app_ ptr_shift_name [ ptr; offset; null_case ]
+  
 
 
   let copy_alloc_id ~ptr ~addr ~null_case =
@@ -419,6 +418,13 @@ module CN_Pointer = struct
   let bits_to_ptr ~bits ~alloc_id = SMT.app_ bits_to_ptr_name [ bits; alloc_id ]
 
   let addr_of ~ptr = SMT.app_ addr_of_name [ ptr ]
+
+  let ptr_shift ~ptr ~offset (* ~null_case *) =
+    (* SMT.app_ ptr_shift_name [ ptr; offset; null_case ] *)
+    SMT.app_ alloc_id_addr_name 
+      [ SMT.app_ alloc_id_name [ptr];
+        SMT.bv_add (addr_of ~ptr) offset
+      ]
 end
 
 module CN_List = struct
@@ -903,12 +909,12 @@ let rec translate_term s iterm =
   | MemberShift (t, tag, member) ->
     CN_Pointer.ptr_shift
       ~ptr:(translate_term s t)
-      ~null_case:(default (Loc ()))
+      (* ~null_case:(default (Loc ())) *)
       ~offset:(translate_term s (IT (OffsetOf (tag, member), Memory.uintptr_bt, loc)))
   | ArrayShift { base; ct; index } ->
     CN_Pointer.ptr_shift
       ~ptr:(translate_term s base)
-      ~null_case:(default (Loc ()))
+      (* ~null_case:(default (Loc ())) *)
       ~offset:
         (let el_size = int_lit_ (Memory.size_of_ctype ct) Memory.uintptr_bt loc in
          translate_term s (mul_ (el_size, index) loc))
