@@ -2911,7 +2911,11 @@ let get_while_bounds_and_cond (i_sym, i_bt) it =
   let i_it = IT (Sym i_sym, i_bt, Cerb_location.unknown) in
   (* Start of range *)
   let lower_bound =
-    if BT.equal_sign (fst (Option.get (BT.is_bits_bt i_bt))) BT.Unsigned then
+    let i_bits_bt_opt = BT.is_bits_bt i_bt in
+    if
+      Option.is_some i_bits_bt_opt
+      && BT.equal_sign (fst (Option.get i_bits_bt_opt)) BT.Unsigned
+    then
       TermBounds.get_lower_bound (i_sym, i_bt) it
     else (
       match TermBounds.get_lower_bound_opt (i_sym, i_bt) it with
