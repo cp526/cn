@@ -26,3 +26,11 @@ int div4 ()
 {
     return (-5) / (-3);
 }
+
+int main(void) {
+    div1();
+    div2();
+    div3();
+    div4();
+    return 0;
+}
