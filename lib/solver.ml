@@ -16,6 +16,8 @@ let inc_timeout = ref (Some 200)
 
 let hybrid = ref true
 
+let race_solvers = ref true
+
 (** Functions that pick names for things. *)
 module CN_Names = struct
   let fn_name x = Sym.pp_string_no_nums x ^ "_" ^ string_of_int (Sym.num x)
@@ -1180,44 +1182,26 @@ module Logger = struct
       { SMT.send = (fun _ -> ()); SMT.receive = (fun _ -> ()); SMT.stop = (fun _ -> ()) }
 end
 
-let solver_path = ref (None : string option)
+let z3_path = ref "z3"
+let cvc5_path = ref "cvc5"
+let solver_type = ref SMT.Z3
 
-let solver_type = ref (None : SMT.solver_extensions option)
+let z3_cfg olog = 
+  SMT.z3 !z3_path (Logger.make (Option.value ~default:"z3" olog))
 
-let solver_flags = ref (None : string list option)
+let cvc5_cfg olog = 
+  SMT.cvc5 !cvc5_path (Logger.make (Option.value ~default:"cvc5" olog))
 
-let select_solver_type () =
-  let default = SMT.Z3 in
+let solver_cfg olog =
   match !solver_type with
-  | Some typ -> typ
-  | None ->
-    (match !solver_path with
-     | None -> default
-     | Some path ->
-       (match Filename.basename path with
-        | "z3" -> SMT.Z3
-        | "cvc5" -> SMT.CVC5
-        | _ -> default))
+  | Z3 -> z3_cfg olog
+  | CVC5 -> cvc5_cfg olog
+  | Other -> failwith "Unsupported solver type."
 
-
-let solver_cfg () =
-  let base_cfg =
-    match select_solver_type () with
-    | Z3 -> SMT.z3
-    | CVC5 -> SMT.cvc5
-    | Other -> failwith "Unsupported solver type."
-  in
-  { base_cfg with
-    exe = Option.value ~default:base_cfg.exe !solver_path;
-    opts = Option.value ~default:base_cfg.opts !solver_flags;
-    log = Logger.make (SMT.string_of_solver_extension base_cfg.exts)
-  }
 
 
 (** Make a new solver instance *)
 let make globals variable_bindings =
-  let cfg = solver_cfg () in
-  let model_cfg = { cfg with log = Logger.make "model" } in
   let _, ctypes, ctypes_rev =
     let open WellTyped in
     CTS.fold
@@ -1225,6 +1209,7 @@ let make globals variable_bindings =
       (get_cts ())
       (0, CTypeMap.empty, IntMap.empty)
   in
+  let cfg = solver_cfg None in
   let s =
     { smt_solver = SMT.new_solver cfg;
       cur_frame = ref (empty_solver_frame (Some SMT.Sat));
@@ -1232,17 +1217,17 @@ let make globals variable_bindings =
       ctypes;
       ctypes_rev;
       globals;
-      model_smt_solver = SMT.new_solver model_cfg
+      model_smt_solver = SMT.new_solver (solver_cfg (Some "model"))
     }
   in
   (* We'd like to use `(reset)` in the model smt solver in-between
      models, but that seems to not work in z3. Instead '(push 1)'
      here, and (pop 1); (push 1) whenever we want to reset. *)
-  List.iter (SMT.ack_command s.model_smt_solver) (SMT.incremental cfg);
+  List.iter (SMT.ack_command s.model_smt_solver) (SMT.incremental cfg.exts);
   SMT.ack_command s.model_smt_solver (SMT.push 1);
   (* regular solver: set incremental and timeout, logging these *)
-  List.iter (SMT.ack_command s.smt_solver) (SMT.incremental cfg);
-  List.iter (SMT.ack_command s.smt_solver) (SMT.timeout cfg !inc_timeout);
+  List.iter (SMT.ack_command s.smt_solver) (SMT.incremental cfg.exts);
+  List.iter (SMT.ack_command s.smt_solver) (SMT.timeout cfg.exts !inc_timeout);
   declare_solver_basics s variable_bindings;
   s
 
@@ -1397,22 +1382,68 @@ let assume solver = function
     set_consistency new_consistency cf
 
 
-let check_new_solver cfg cmds =
+
+
+let race (comps : (unit -> 'a) list) : 'a =
+  let result = Atomic.make None in
+  let launch i comp = 
+    Domain.spawn (fun () ->
+      let r = 
+	try Ok (comp ()) 
+        with e -> Error e
+      in
+      ignore (Atomic.compare_and_set result None (Some (i, r)))
+    )
+  in
+  let _domains = List.mapi launch comps in
+  let rec wait () = 
+    match Atomic.get result with
+    | Some (_i, r) -> r
+    | None -> 
+      Domain.cpu_relax (); 
+      wait ()
+  in
+  match wait () with
+  | Ok v -> v
+  | Error e -> raise e
+
+
+let check_new_solver_single cfg cmds =
   let s = SMT.new_solver cfg in
   List.iter (SMT.ack_command s) cmds;
   let result = SMT.check s in
   s.stop ();
   result
 
+let check_new_solver_concurrent cfgs cmds = 
+  let comps = 
+    List.map (fun cfg () ->
+      let s = SMT.new_solver cfg in
+      Fun.protect (fun () ->
+	List.iter (SMT.ack_command s) cmds;
+	SMT.check s
+      ) ~finally:(fun () ->
+	try s.stop () with _ -> ()
+      )
+    ) cfgs
+  in
+  race comps
+
+
+
+let check_new_solver cfg cmds =
+  if !race_solvers then check_new_solver_concurrent [z3_cfg None; ] cmds
+  else check_new_solver_single cfg cmds
+
 
 let reset_solver_and_check s cmds =
-  let cfg = solver_cfg () in
+  let cfg = solver_cfg None in
   s.smt_solver.stop ();
   s.smt_solver <- SMT.new_solver cfg;
-  List.iter (SMT.ack_command s.smt_solver) (SMT.incremental cfg);
+  List.iter (SMT.ack_command s.smt_solver) (SMT.incremental cfg.exts);
   List.iter (debug_ack_command s) (get_commands_with_pushes s);
   let result = if !hybrid then check_new_solver cfg cmds else SMT.check s.smt_solver in
-  List.iter (SMT.ack_command s.smt_solver) (SMT.timeout cfg !inc_timeout);
+  List.iter (SMT.ack_command s.smt_solver) (SMT.timeout cfg.exts !inc_timeout);
   result
 
 

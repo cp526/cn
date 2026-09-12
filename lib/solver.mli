@@ -14,11 +14,10 @@ module Logger : sig
   val dir : string option ref
 end
 
-val solver_path : string option ref
+val z3_path : string ref
+val cvc5_path : string ref
 
-val solver_flags : string list option ref
-
-val solver_type : Simple_smt.solver_extensions option ref
+val solver_type : Simple_smt.solver_extensions ref
 
 val inc_enabled : bool ref
 

@@ -907,46 +907,42 @@ let printf_log =
   }
 
 
-let cvc5 : solver_config =
-  { exe = "cvc5";
-    (* opts = [ "--incremental"; "--sets-ext"; "--force-logic=QF_AUFBVDTLIA" ]; *)
-    (* NOTE cvc5 1.2.1 renamed --sets-ext to --sets-exp *)
+let cvc5 path logger : solver_config =
+  { exe = path;
     opts = [ "--sets-exp"; "--force-logic=QF_ALL"; "--arrays-exp" ];
     setup = [];
     exts = CVC5;
-    log = quiet_log
+    log = logger
   }
 
 
-let z3 : solver_config =
-  let setup =
-    [ set_option ":auto_config" "false";
+let z3 path logger : solver_config =
+  { exe = path; 
+    opts = [ "-in"; "-smt2" ]; 
+    setup = [ 
+      set_option ":auto_config" "false";
       set_option ":model.completion" "true";
       set_option ":smt.relevancy" "0"
-      (* set_option ":sat.smt" "true"; *)
-      (* not ready for use just yet -- see Z3 github issue tracker *)
-      (* set_option ":combined_solver.solver2_timeout" "500"; *)
-      (* set_option ":combined_solver.solver2_unknown" "2"; *)
-      (* list [atom "set-simplifier"; simple_command ["then"; "simplify"; "propagate-values"; "solve-eqs";]] *)
-    ]
-  in
-  { exe = "z3"; opts = [ "-in"; "-smt2" ]; setup; exts = Z3; log = quiet_log }
+    ]; 
+    exts = Z3; 
+    log = logger 
+  }
 
 
-let incremental cfg =
-  match cfg.exts with
+let incremental ext =
+  match ext with
   | Z3 -> []
   | CVC5 -> [ set_option ":incremental" "true" ]
   | Other -> assert false
 
 
-let timeout cfg n =
-  match cfg.exts with
+let timeout ext n =
+  match ext with
   | Z3 -> [ set_option ":timeout" (string_of_int n) ]
   | CVC5 -> [ set_option ":tlimit-per" (string_of_int n) ]
   | Other -> assert false
 
 
-let timeout cfg ot =
+let timeout ext ot =
   (* 0 encodes 'no timeout' in the solvers *)
-  timeout cfg (Option.value ~default:0 ot)
+  timeout ext (Option.value ~default:0 ot)

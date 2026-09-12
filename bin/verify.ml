@@ -28,8 +28,8 @@ let verify
       csv_times
       stdout_times
       solver_logging
-      solver_flags
-      solver_path
+      z3_path
+      cvc5_path
       solver_type
       solver_inc_enabled
       solver_inc_timeout
@@ -63,9 +63,9 @@ let verify
      Solver.Logger.to_file := true;
      Solver.Logger.dir := if String.equal d "" then None else Some d
    | _ -> ());
-  Solver.solver_path := solver_path;
+  Solver.z3_path := z3_path;
+  Solver.cvc5_path := cvc5_path;
   Solver.solver_type := solver_type;
-  Solver.solver_flags := solver_flags;
   Solver.try_hard := try_hard;
   Solver.inc_enabled := solver_inc_enabled;
   Solver.inc_timeout := solver_inc_timeout;
@@ -142,30 +142,27 @@ module Flags = struct
       & info ~docs:s_verification [ "solver-logging" ] ~docv:"DIR" ~doc)
 
 
-  let solver_flags =
-    let doc =
-      "Ovewrite default solver flags. Note that flags should enable at least incremental \
-       checking."
-    in
+  let z3_path =
+    let doc = "Path to z3 executable" in
     Arg.(
       value
-      & opt (some (list string)) None
-      & info ~docs:s_verification [ "solver-flags" ] ~docv:"X,Y,Z" ~doc)
+      & opt file !Solver.z3_path
+      & info ~docs:s_verification [ "z3-path" ] ~docv:"FILE" ~doc)
 
 
-  let solver_path =
-    let doc = "Path to SMT solver executable" in
+  let cvc5_path =
+    let doc = "Path to cvc5 executable" in
     Arg.(
       value
-      & opt (some file) None
-      & info ~docs:s_verification [ "solver-path" ] ~docv:"FILE" ~doc)
+      & opt file !Solver.cvc5_path
+      & info ~docs:s_verification [ "cvc5-path" ] ~docv:"FILE" ~doc)
 
 
   let solver_type =
     let doc = "Specify the SMT solver interface" in
     Arg.(
       value
-      & opt (some (enum [ ("z3", Simple_smt.Z3); ("cvc5", Simple_smt.CVC5) ])) None
+      & opt (enum [ ("z3", Simple_smt.Z3); ("cvc5", Simple_smt.CVC5) ]) !Solver.solver_type
       & info ~docs:s_verification [ "solver-type" ] ~docv:"z3|cvc5" ~doc)
 
 
@@ -335,8 +332,8 @@ let verify_t : unit Term.t =
   $ Common.Flags.csv_times
   $ Common.Flags.stdout_times
   $ Flags.solver_logging
-  $ Flags.solver_flags
-  $ Flags.solver_path
+  $ Flags.z3_path
+  $ Flags.cvc5_path
   $ Flags.solver_type
   $ Flags.solver_inc_enabled
   $ Flags.solver_inc_timeout
