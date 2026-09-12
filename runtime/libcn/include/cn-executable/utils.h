@@ -38,10 +38,23 @@ enum region_owned {
   FULL_WILDCARD,
 };
 
-/* Error handlers */
-void fulminate_destroy(void);
-void fulminate_init(void);
+struct fulm_init_flags {
+  bool with_ghost_args;
+  bool source_locs_mode;
+  bool correct_missing_ownership;
+  bool ownership_stack_mode;
+};
 
+struct fulm_init_config {
+  size_t max_bump_blocks;
+  size_t bump_block_size;
+  struct fulm_init_flags flags;
+};
+
+void fulminate_destroy(bool with_ghost_args);
+void fulminate_init(struct fulm_init_config flags);
+
+/* Error handlers */
 enum cn_logging_level {
   CN_LOGGING_NONE = 0,
   CN_LOGGING_ERROR = 1,
@@ -76,11 +89,9 @@ struct cn_error_message_info {
   struct cn_error_message_info* child;
 };
 
-void initialise_error_msg_info_(
-    const char* function_name, char* file_name, int line_number);
+void init_error_msg_info_(const char* function_name, char* file_name, int line_number);
 
-#define initialise_error_msg_info()                                                      \
-  initialise_error_msg_info_(__func__, __FILE__, __LINE__)
+#define init_error_msg_info() init_error_msg_info_(__func__, __FILE__, __LINE__)
 
 void reset_error_msg_info(void);
 void free_error_msg_info(void);
@@ -152,18 +163,18 @@ typedef struct cn_alloc_id {
 
 typedef hash_table cn_map;
 
-void initialise_ownership_ghost_state(void);
+void init_ownership_ghost_state(void);
 void free_ownership_ghost_state(void);
-void initialise_ghost_stack_depth(void);
-void initialise_exec_c_locs_mode(bool flag);
-void initialise_correct_missing_ownership(bool flag);
-void initialise_ownership_stack_mode(bool flag);
+void init_ghost_stack_depth(void);
+void init_source_locs_mode(bool flag);
+void init_correct_missing_ownership(bool flag);
+void init_ownership_stack_mode(bool flag);
 signed long get_cn_stack_depth(void);
 void ghost_stack_depth_incr(void);
 void ghost_stack_depth_decr(void);
 void cn_postcondition_leak_check(void);
 
-struct loop_ownership* initialise_loop_ownership_state(void);
+struct loop_ownership* init_loop_ownership_state(void);
 void cn_loop_leak_check(void);
 void cn_loop_put_back_ownership(struct loop_ownership* loop_ownership);
 
@@ -593,7 +604,7 @@ enum region_owned c_ownership_check(char* access_kind,
     enum spec_mode spec_mode);
 
 /* Ghost arguments */
-void initialise_ghost_frame_stack(void);
+void init_ghost_frame_stack(void);
 void push_ghost_frame(int tag, int size);
 void add_arg_to_ghost_frame(int i, void* ptr_to_ghost_arg);
 void* load_arg_from_ghost_frame(int i);

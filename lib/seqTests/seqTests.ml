@@ -199,8 +199,12 @@ let create_test_file (sequence : Pp.document) (fun_decls : Pp.document) : Pp.doc
           2
           (hardline
            ^^
-           let init_ghost = Fulminate.Ownership.get_ownership_global_init_stats () in
-           separate_map hardline SUtils.stmt_to_doc init_ghost ^^ hardline ^^ sequence)
+           let fulm_init =
+             Fulminate.Internal.get_global_init_stats ()
+             (* ghost args enabled *)
+           in
+           separate_map hardline SUtils.stmt_to_doc [ fulm_init ] ^^ hardline ^^ sequence
+          )
         ^^ hardline)
 
 

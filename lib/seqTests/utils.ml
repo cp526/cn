@@ -205,8 +205,11 @@ let create_intermediate_test_file
             2
             (hardline
              ^^
-             let init_ghost = Fulminate.Ownership.get_ownership_global_init_stats () in
-             separate_map hardline stmt_to_doc init_ghost
+             let fulm_init =
+               Fulminate.Internal.get_global_init_stats ()
+               (* ghost args enabled *)
+             in
+             separate_map hardline stmt_to_doc [ fulm_init ]
              ^^ hardline
              ^^ string "set_cn_failure_cb(&seq_failure_cb);"
              ^^ hardline

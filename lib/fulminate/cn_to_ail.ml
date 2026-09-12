@@ -4544,7 +4544,7 @@ let get_loop_ownership_bs_and_ss () =
     create_binding loop_local_ownership_sym loop_ownership_struct_ptr_ctype
   in
   let loop_ownership_init_fn_call =
-    A.(AilEcall (mk_expr (AilEident (Sym.fresh "initialise_loop_ownership_state")), []))
+    A.(AilEcall (mk_expr (AilEident (Sym.fresh "init_loop_ownership_state")), []))
   in
   let loop_ownership_decl = A.(AilSdeclaration [ (loop_local_ownership_sym, None) ]) in
   let loop_ownership_assign =

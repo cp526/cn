@@ -45,42 +45,6 @@ let c_remove_ownership_fn_sym = Sym.fresh "c_remove_from_ghost_state"
    let c_declare_init_and_map_local_sym = Sym.fresh "c_declare_init_and_map_local"
 *)
 
-let get_ownership_global_init_stats ?max_bump_blocks ?bump_block_size () =
-  let bump_config_calls =
-    let make_bump_config_call fn_name n =
-      mk_expr
-        A.(
-          AilEcall
-            ( mk_expr (AilEident (Sym.fresh fn_name)),
-              [ mk_expr
-                  (AilEconst (ConstantInteger (IConstant (Z.of_int n, Decimal, None))))
-              ] ))
-    in
-    [ Option.map (make_bump_config_call "cn_bump_set_max_blocks") max_bump_blocks;
-      Option.map (make_bump_config_call "cn_bump_set_block_size") bump_block_size
-    ]
-    |> List.filter_map Fun.id
-  in
-  let cn_ghost_state_init_fcall =
-    mk_expr
-      A.(
-        AilEcall (mk_expr (AilEident (Sym.fresh "initialise_ownership_ghost_state")), []))
-  in
-  let cn_ghost_stack_depth_init_fcall =
-    mk_expr
-      A.(AilEcall (mk_expr (AilEident (Sym.fresh "initialise_ghost_stack_depth")), []))
-  in
-  let fcalls = [ cn_ghost_state_init_fcall; cn_ghost_stack_depth_init_fcall ] in
-  let fcalls =
-    let cn_initialise_ghost_frame_stack_fcall =
-      mk_expr
-        A.(AilEcall (mk_expr (AilEident (Sym.fresh "initialise_ghost_frame_stack")), []))
-    in
-    fcalls @ [ cn_initialise_ghost_frame_stack_fcall ]
-  in
-  List.map (fun e -> A.(AilSexpr e)) (bump_config_calls @ fcalls)
-
-
 let generate_c_local_cn_addr_var sym =
   (* Hardcoding parts of cn_to_ail_base_type to prevent circular dependency between
       this module and Cn_internal_to_ail, which includes Ownership already. *)

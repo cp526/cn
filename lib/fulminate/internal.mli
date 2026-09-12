@@ -96,8 +96,17 @@ val generate_conversion_and_equality_functions
 
 val has_main : GenTypes.genTypeCategory AilSyntax.sigma -> bool
 
+val get_global_init_stats
+  :  ?max_bump_blocks:int ->
+  ?bump_block_size:int ->
+  ?source_locs_mode:bool ->
+  ?correct_missing_ownership_mode:bool ->
+  ?experimental_ownership_stack_mode:bool ->
+  unit ->
+  GenTypes.genTypeCategory AilSyntax.statement_
+
 val generate_global_assignments
-  :  ?exec_c_locs_mode:bool ->
+  :  ?source_locs_mode:bool ->
   ?correct_missing_ownership_mode:bool ->
   ?experimental_ownership_stack_mode:bool ->
   ?max_bump_blocks:int ->
