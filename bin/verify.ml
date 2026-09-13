@@ -162,7 +162,9 @@ module Flags = struct
     let doc = "Specify the SMT solver interface" in
     Arg.(
       value
-      & opt (enum [ ("z3", Simple_smt.Z3); ("cvc5", Simple_smt.CVC5) ]) !Solver.solver_type
+      & opt
+          (enum [ ("z3", Simple_smt.Z3); ("cvc5", Simple_smt.CVC5) ])
+          !Solver.solver_type
       & info ~docs:s_verification [ "solver-type" ] ~docv:"z3|cvc5" ~doc)
 
 
@@ -191,7 +193,9 @@ module Flags = struct
     in
     Arg.(
       value
-      & opt (some (enum [ ("z3", Simple_smt.Z3); ("cvc5", Simple_smt.CVC5) ])) !Solver.hybrid
+      & opt
+          (some (enum [ ("z3", Simple_smt.Z3); ("cvc5", Simple_smt.CVC5) ]))
+          !Solver.hybrid
       & info ~docs:s_verification [ "hybrid-solving" ] ~doc)
 
 

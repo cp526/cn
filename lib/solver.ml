@@ -16,7 +16,6 @@ let inc_timeout = ref (Some 200)
 
 let hybrid = ref (None : SMT.solver_extensions option)
 
-
 (** Functions that pick names for things. *)
 module CN_Names = struct
   let fn_name x = Sym.pp_string_no_nums x ^ "_" ^ string_of_int (Sym.num x)
@@ -1182,21 +1181,20 @@ module Logger = struct
 end
 
 let z3_path = ref "z3"
+
 let cvc5_path = ref "cvc5"
+
 let solver_type = ref SMT.Z3
 
-let z3_cfg olog = 
-  SMT.z3 !z3_path (Logger.make (Option.value ~default:"z3" olog))
+let z3_cfg olog = SMT.z3 !z3_path (Logger.make (Option.value ~default:"z3" olog))
 
-let cvc5_cfg olog = 
-  SMT.cvc5 !cvc5_path (Logger.make (Option.value ~default:"cvc5" olog))
+let cvc5_cfg olog = SMT.cvc5 !cvc5_path (Logger.make (Option.value ~default:"cvc5" olog))
 
 let solver_cfg olog =
   match !solver_type with
   | Z3 -> z3_cfg olog
   | CVC5 -> cvc5_cfg olog
   | Other -> failwith "Unsupported solver type."
-
 
 
 (** Make a new solver instance *)
@@ -1381,8 +1379,6 @@ let assume solver = function
     set_consistency new_consistency cf
 
 
-
-
 let check_new_solver cfg cmds =
   let s = SMT.new_solver cfg in
   List.iter (SMT.ack_command s) cmds;
@@ -1397,12 +1393,12 @@ let reset_solver_and_check s cmds =
   s.smt_solver <- SMT.new_solver cfg;
   List.iter (SMT.ack_command s.smt_solver) (SMT.incremental cfg.exts);
   List.iter (debug_ack_command s) (get_commands_with_pushes s);
-  let result = 
+  let result =
     match !hybrid with
     | Some Z3 -> check_new_solver (z3_cfg None) cmds
     | Some CVC5 -> check_new_solver (cvc5_cfg None) cmds
     | Some Other -> failwith "Unsupported solver."
-    | None -> SMT.check s.smt_solver 
+    | None -> SMT.check s.smt_solver
   in
   List.iter (SMT.ack_command s.smt_solver) (SMT.timeout cfg.exts !inc_timeout);
   result

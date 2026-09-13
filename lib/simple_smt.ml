@@ -917,15 +917,15 @@ let cvc5 path logger : solver_config =
 
 
 let z3 path logger : solver_config =
-  { exe = path; 
-    opts = [ "-in"; "-smt2" ]; 
-    setup = [ 
-      set_option ":auto_config" "false";
-      set_option ":model.completion" "true";
-      set_option ":smt.relevancy" "0"
-    ]; 
-    exts = Z3; 
-    log = logger 
+  { exe = path;
+    opts = [ "-in"; "-smt2" ];
+    setup =
+      [ set_option ":auto_config" "false";
+        set_option ":model.completion" "true";
+        set_option ":smt.relevancy" "0"
+      ];
+    exts = Z3;
+    log = logger
   }
 
 

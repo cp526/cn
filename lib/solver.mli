@@ -15,6 +15,7 @@ module Logger : sig
 end
 
 val z3_path : string ref
+
 val cvc5_path : string ref
 
 val solver_type : Simple_smt.solver_extensions ref
