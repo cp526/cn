@@ -14,9 +14,8 @@ let inc_enabled = ref true
 
 let inc_timeout = ref (Some 200)
 
-let hybrid = ref true
+let hybrid = ref (None : SMT.solver_extensions option)
 
-let race_solvers = ref true
 
 (** Functions that pick names for things. *)
 module CN_Names = struct
@@ -1384,56 +1383,12 @@ let assume solver = function
 
 
 
-let race (comps : (unit -> 'a) list) : 'a =
-  let result = Atomic.make None in
-  let launch i comp = 
-    Domain.spawn (fun () ->
-      let r = 
-	try Ok (comp ()) 
-        with e -> Error e
-      in
-      ignore (Atomic.compare_and_set result None (Some (i, r)))
-    )
-  in
-  let _domains = List.mapi launch comps in
-  let rec wait () = 
-    match Atomic.get result with
-    | Some (_i, r) -> r
-    | None -> 
-      Domain.cpu_relax (); 
-      wait ()
-  in
-  match wait () with
-  | Ok v -> v
-  | Error e -> raise e
-
-
-let check_new_solver_single cfg cmds =
+let check_new_solver cfg cmds =
   let s = SMT.new_solver cfg in
   List.iter (SMT.ack_command s) cmds;
   let result = SMT.check s in
   s.stop ();
   result
-
-let check_new_solver_concurrent cfgs cmds = 
-  let comps = 
-    List.map (fun cfg () ->
-      let s = SMT.new_solver cfg in
-      Fun.protect (fun () ->
-	List.iter (SMT.ack_command s) cmds;
-	SMT.check s
-      ) ~finally:(fun () ->
-	try s.stop () with _ -> ()
-      )
-    ) cfgs
-  in
-  race comps
-
-
-
-let check_new_solver cfg cmds =
-  if !race_solvers then check_new_solver_concurrent [z3_cfg None; ] cmds
-  else check_new_solver_single cfg cmds
 
 
 let reset_solver_and_check s cmds =
@@ -1442,7 +1397,13 @@ let reset_solver_and_check s cmds =
   s.smt_solver <- SMT.new_solver cfg;
   List.iter (SMT.ack_command s.smt_solver) (SMT.incremental cfg.exts);
   List.iter (debug_ack_command s) (get_commands_with_pushes s);
-  let result = if !hybrid then check_new_solver cfg cmds else SMT.check s.smt_solver in
+  let result = 
+    match !hybrid with
+    | Some Z3 -> check_new_solver (z3_cfg None) cmds
+    | Some CVC5 -> check_new_solver (cvc5_cfg None) cmds
+    | Some Other -> failwith "Unsupported solver."
+    | None -> SMT.check s.smt_solver 
+  in
   List.iter (SMT.ack_command s.smt_solver) (SMT.timeout cfg.exts !inc_timeout);
   result
 
